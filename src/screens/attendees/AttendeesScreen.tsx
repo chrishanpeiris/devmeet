@@ -15,74 +15,13 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeCard } from '@/components/cards/SwipeCard';
 import { colors, spacing, radius, typography } from '@/theme';
 import { getProfile, saveConnection, addSkipped, getSkipped } from '@/store/profileStore';
+import { fetchAttendees, joinEvent, saveConnectionRemote } from '@/lib/api';
 import type { Attendee, Connection } from '@/types';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { MainTabParamList } from '@/types';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
-// ── Mock attendees (replace with Supabase realtime query) ─────────────────────
-function buildMockAttendees(myTechStack: string[]): Attendee[] {
-  const pool: Omit<Attendee, 'mutual_tags' | 'is_connected'>[] = [
-    {
-      id: 'u1', name: 'Sarah Kim', role: 'senior', joined_at: new Date().toISOString(),
-      bio: 'Building dev tools at Vercel. Open source contributor.',
-      tech_stack: ['React', 'TypeScript', 'Node.js', 'Next.js'],
-      interests: ['Developer Tools', 'Open Source'],
-      looking_for: ['collaboration', 'networking'],
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 'u2', name: 'Marcus Webb', role: 'mid', joined_at: new Date().toISOString(),
-      bio: 'Full stack at a FinTech startup. Love GraphQL.',
-      tech_stack: ['React', 'GraphQL', 'PostgreSQL', 'Docker'],
-      interests: ['FinTech', 'Startups'],
-      looking_for: ['job', 'networking'],
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 'u3', name: 'Priya Nair', role: 'lead', joined_at: new Date().toISOString(),
-      bio: 'Engineering lead. 8 yrs of React. Now mentoring juniors.',
-      tech_stack: ['React', 'TypeScript', 'AWS', 'Redis'],
-      interests: ['Design Systems', 'SaaS'],
-      looking_for: ['mentorship', 'hiring'],
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 'u4', name: 'James O\'Brien', role: 'junior', joined_at: new Date().toISOString(),
-      bio: 'Recent bootcamp grad. Passionate about React Native.',
-      tech_stack: ['React Native', 'JavaScript', 'Node.js'],
-      interests: ['Mobile', 'Startups'],
-      looking_for: ['job', 'mentorship'],
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 'u5', name: 'Aiko Tanaka', role: 'senior', joined_at: new Date().toISOString(),
-      bio: 'ML engineer who also does frontend. Python + React.',
-      tech_stack: ['Python', 'React', 'Machine Learning', 'AWS'],
-      interests: ['AI', 'Web'],
-      looking_for: ['collaboration', 'networking'],
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 'u6', name: 'Devlin Cross', role: 'founder', joined_at: new Date().toISOString(),
-      bio: 'CTO at a seed-stage EdTech. Always looking for great engineers.',
-      tech_stack: ['TypeScript', 'React', 'Go', 'Kubernetes'],
-      interests: ['EdTech', 'Startups'],
-      looking_for: ['hiring', 'networking'],
-      created_at: new Date().toISOString(),
-    },
-  ];
-
-  const skipped = getSkipped();
-  return pool
-    .filter((a) => !skipped.includes(a.id))
-    .map((a) => ({
-      ...a,
-      mutual_tags:  a.tech_stack.filter((t) => myTechStack.includes(t)),
-      is_connected: false,
-    }));
-}
 
 type Props = BottomTabScreenProps<MainTabParamList, 'Attendees'>;
 
@@ -95,14 +34,22 @@ export function AttendeesScreen({ route, navigation }: Props) {
 
   useEffect(() => {
     const profile = getProfile();
-    setTimeout(() => {
-      setAttendees(buildMockAttendees(profile?.tech_stack ?? []));
-      setLoading(false);
-    }, 400);
-  }, []);
+    if (!profile) { setLoading(false); return; }
+
+    // Register attendance in Supabase, then load other attendees
+    joinEvent(eventId, profile.id)
+      .catch(() => {}) // non-fatal if already joined
+      .finally(() =>
+        fetchAttendees(eventId, profile, getSkipped())
+          .then(setAttendees)
+          .catch(() => setAttendees([]))
+          .finally(() => setLoading(false)),
+      );
+  }, [eventId]);
 
   const handleConnect = useCallback((attendee: Attendee) => {
-    // Save to offline store
+    const profile = getProfile();
+    // Save offline first (instant, works without internet)
     const conn: Connection = {
       id:             `conn_${Date.now()}`,
       connected_user: attendee,
@@ -110,10 +57,14 @@ export function AttendeesScreen({ route, navigation }: Props) {
       connected_at:   new Date().toISOString(),
     };
     saveConnection(conn);
+    // Then sync to Supabase in background (non-blocking)
+    if (profile) {
+      saveConnectionRemote(profile.id, attendee.id, eventId).catch(() => {});
+    }
     setMatchFlash(attendee.name);
     setTimeout(() => setMatchFlash(null), 1800);
     setAttendees((prev) => prev.slice(0, -1));
-  }, [eventName]);
+  }, [eventName, eventId]);
 
   const handleSkip = useCallback((attendee: Attendee) => {
     addSkipped(attendee.id);

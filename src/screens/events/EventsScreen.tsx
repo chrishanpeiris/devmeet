@@ -10,45 +10,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { colors, spacing, radius, typography } from '@/theme';
+import { fetchEvents, fetchEventByCode } from '@/lib/api';
 import type { Event, MainTabParamList } from '@/types';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-
-// ── Seeded mock events (swap with Supabase query in production) ───────────────
-const MOCK_EVENTS: Event[] = [
-  {
-    id:            'evt_1',
-    name:          'ReactConf London 2026',
-    description:   'The UK\'s biggest React meetup. Talks, workshops, and networking.',
-    location_name: 'Old Street Roundabout, London',
-    latitude:      51.5255,
-    longitude:    -0.0874,
-    join_code:     'REACT26',
-    date:          '2026-06-15T18:00:00Z',
-    attendee_count: 142,
-  },
-  {
-    id:            'evt_2',
-    name:          'TypeScript Meetup Berlin',
-    description:   'Monthly TypeScript deep-dives with the Berlin developer community.',
-    location_name: 'Factory Berlin, Görlitzer Park',
-    latitude:      52.4970,
-    longitude:     13.4266,
-    join_code:     'TS2026',
-    date:          '2026-06-20T19:00:00Z',
-    attendee_count: 87,
-  },
-  {
-    id:            'evt_3',
-    name:          'DevConnect SF',
-    description:   'Cross-discipline developer networking night in SoMa.',
-    location_name: 'Bespoke, SoMa, San Francisco',
-    latitude:      37.7836,
-    longitude:    -122.4027,
-    join_code:     'DEVSF',
-    date:          '2026-07-02T18:30:00Z',
-    attendee_count: 203,
-  },
-];
 
 interface Props {
   navigation: BottomTabNavigationProp<MainTabParamList, 'Events'>;
@@ -62,17 +26,14 @@ export function EventsScreen({ navigation }: Props) {
   const [codeError, setCodeError] = useState('');
 
   useEffect(() => {
-    // Simulate a network fetch
-    setTimeout(() => {
-      setEvents(MOCK_EVENTS);
-      setLoading(false);
-    }, 600);
+    fetchEvents()
+      .then(setEvents)
+      .catch(() => setEvents([]))
+      .finally(() => setLoading(false));
   }, []);
 
-  function joinByCode() {
-    const event = MOCK_EVENTS.find(
-      (e) => e.join_code.toUpperCase() === code.toUpperCase().trim(),
-    );
+  async function joinByCode() {
+    const event = await fetchEventByCode(code);
     if (!event) {
       setCodeError('No event found with that code. Try: REACT26, TS2026, or DEVSF');
       return;
